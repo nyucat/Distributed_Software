@@ -1,11 +1,11 @@
 package com.seckill.order.service.impl;
 
 import cn.hutool.core.util.IdUtil;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.seckill.order.entity.Order;
 import com.seckill.order.mapper.OrderMapper;
 import com.seckill.order.mq.OrderMessage;
+import com.seckill.order.mq.OrderPayMessage;
 import com.seckill.order.service.OrderService;
 import com.seckill.product.entity.Product;
 import com.seckill.product.service.ProductService;
@@ -35,6 +35,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private static final String STOCK_KEY_PREFIX = "seckill:stock:";
     private static final String BOUGHT_SET_PREFIX = "seckill:bought:";
     private static final String TOPIC_ORDER = "seckill-orders";
+    private static final String TOPIC_ORDER_PAY = "seckill-order-pay";
 
     @Override
     public String seckill(Long productId, Long userId) {
@@ -89,6 +90,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         Product product = productService.getById(productId);
         if (product == null || product.getStock() <= 0) {
             log.error("创建订单失败，数据库商品库存不足。orderId={}", orderId);
+            rollbackRedisReservation(productId, userId);
             return;
         }
 
@@ -97,6 +99,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         boolean deductSuccess = productService.deductStock(productId, 1);
         if (!deductSuccess) {
             log.error("创建订单失败，扣减数据库库存失败。orderId={}", orderId);
+            rollbackRedisReservation(productId, userId);
             return; // 扣减失败，放弃下单
         }
 
@@ -109,7 +112,61 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         order.setStatus(0); // 待支付
         order.setCreateTime(LocalDateTime.now());
 
-        this.save(order);
+        boolean saved = this.save(order);
+        if (!saved) {
+            log.error("创建订单失败，订单写库失败。orderId={}", orderId);
+            rollbackRedisReservation(productId, userId);
+            throw new RuntimeException("订单写库失败");
+        }
+
         log.info("订单创建成功并写入数据库！orderId={}", orderId);
+    }
+
+    @Override
+    public String payOrder(Long orderId, Long userId) {
+        Order order = this.getById(orderId);
+        if (order == null) {
+            return "订单不存在";
+        }
+        if (!userId.equals(order.getUserId())) {
+            return "无权支付该订单";
+        }
+        if (order.getStatus() != null && order.getStatus() == 1) {
+            return "订单已支付，请勿重复操作";
+        }
+        if (order.getStatus() != null && order.getStatus() == 2) {
+            return "订单已取消，无法支付";
+        }
+
+        OrderPayMessage payMessage = new OrderPayMessage();
+        payMessage.setOrderId(orderId);
+        payMessage.setUserId(userId);
+        payMessage.setStatus(1);
+        rocketMQTemplate.convertAndSend(TOPIC_ORDER_PAY, payMessage);
+        log.info("支付消息已发送，orderId={}, userId={}", orderId, userId);
+        return "支付请求已受理，订单状态更新中";
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void executeLocalPayTransaction(Long orderId, Long userId) {
+        boolean updated = this.lambdaUpdate()
+                .eq(Order::getOrderId, orderId)
+                .eq(Order::getUserId, userId)
+                .eq(Order::getStatus, 0)
+                .set(Order::getStatus, 1)
+                .update();
+        if (!updated) {
+            throw new RuntimeException("订单状态更新失败或状态已变更，orderId=" + orderId);
+        }
+        log.info("订单支付成功，状态已更新为已支付。orderId={}", orderId);
+    }
+
+    private void rollbackRedisReservation(Long productId, Long userId) {
+        String stockKey = STOCK_KEY_PREFIX + productId;
+        String boughtKey = BOUGHT_SET_PREFIX + productId;
+        stringRedisTemplate.opsForValue().increment(stockKey);
+        stringRedisTemplate.opsForSet().remove(boughtKey, String.valueOf(userId));
+        log.info("已回滚 Redis 预扣减与幂等标记。productId={}, userId={}", productId, userId);
     }
 }

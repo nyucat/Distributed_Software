@@ -38,4 +38,16 @@ public class OrderController {
         }
         return Result.error("订单未找到");
     }
+
+    /**
+     * 模拟支付接口：通过 MQ 异步更新订单状态，保障支付链路最终一致
+     */
+    @PostMapping("/pay")
+    public Result<String> pay(@RequestParam("orderId") Long orderId, @RequestParam("userId") Long userId) {
+        try {
+            return Result.success(orderService.payOrder(orderId, userId));
+        } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
+    }
 }

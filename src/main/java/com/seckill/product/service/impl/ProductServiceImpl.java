@@ -13,6 +13,7 @@ import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import java.util.concurrent.TimeUnit;
@@ -109,20 +110,21 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
                 lock.unlock();
             }
         }
+    }
+
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean deductStock(Long productId, Integer quantity) {
-        // 在实际业务中，由于库存扣减涉及并发，通常应该在数据库通过 `update set stock = stock - N where stock >= N` 保证
-        // 或者直接通过 Redis + Lua 实现，这里为了验证读写分离 (主库写)，仅演示通过 MyBatis-Plus 去更新数据
-        Product product = this.getById(productId);
-        if (product != null && product.getStock() >= quantity) {
-            product.setStock(product.getStock() - quantity);
-            boolean updated = this.updateById(product);
-            if (updated) {
-                // 清理缓存以保证一致性
-                stringRedisTemplate.delete(CACHE_KEY_PREFIX + productId);
-            }
-            return updated;
+        // 使用条件更新保证并发安全: stock >= quantity 才允许扣减
+        boolean updated = this.lambdaUpdate()
+                .eq(Product::getProductId, productId)
+                .ge(Product::getStock, quantity)
+                .setSql("stock = stock - " + quantity)
+                .update();
+        if (updated) {
+            // 库存变更后清理详情缓存，避免脏读
+            stringRedisTemplate.delete(CACHE_KEY_PREFIX + productId);
         }
-        return false;
+        return updated;
     }
 }
