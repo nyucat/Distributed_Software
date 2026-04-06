@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分布式秒杀系统 - 商品详情</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>秒杀商品详情 (测试动静分离)</h1>
+        
+        <div class="product-card" id="product-card">
+            <h2 id="product-name">正在加载...</h2>
+            <div class="price-box">
+                <span class="label">秒杀价：</span>
+                <span class="price">¥ <span id="product-price">--</span></span>
+            </div>
+            <div class="stock-box">
+                <span class="label">剩余库存：</span>
+                <span class="stock" id="product-stock">--</span>
+            </div>
+            <p class="desc" id="product-desc">......</p>
+            
+            <button class="buy-btn" id="buy-btn">立即抢购</button>
+        </div>
+
+        <div class="server-info">
+            当前响应后端：<span id="server-port" style="color: #d32f2f; font-weight: bold;">--</span>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
