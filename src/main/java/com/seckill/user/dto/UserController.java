@@ -1,7 +1,5 @@
-package com.seckill.user.controller;
+package com.seckill.user.dto;
 
-import com.seckill.user.dto.LoginDTO;
-import com.seckill.user.dto.RegisterDTO;
 import com.seckill.user.service.UserService;
 import com.seckill.user.vo.LoginVO;
 import com.seckill.user.vo.Result;

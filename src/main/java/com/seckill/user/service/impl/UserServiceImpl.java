@@ -1,7 +1,6 @@
 package com.seckill.user.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.seckill.user.dto.LoginDTO;
@@ -13,6 +12,7 @@ import com.seckill.user.utils.JwtUtils;
 import com.seckill.user.vo.LoginVO;
 import com.seckill.user.vo.UserVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -22,6 +22,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Autowired
     private JwtUtils jwtUtils;
+
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Override
     public LoginVO login(LoginDTO loginDTO) {
@@ -35,8 +37,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         
         // Verify password
-        String encryptPassword = DigestUtil.md5Hex(loginDTO.getPassword());
-        if (!encryptPassword.equals(user.getPassword())) {
+        if (!passwordEncoder.matches(loginDTO.getPassword(), user.getPassword())) {
             throw new RuntimeException("Incorrect password");
         }
         
@@ -64,7 +65,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // Create new user
         User user = new User();
         user.setUsername(registerDTO.getUsername());
-        user.setPassword(DigestUtil.md5Hex(registerDTO.getPassword()));
+        user.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
         user.setPhone(registerDTO.getPhone());
         user.setCreateTime(LocalDateTime.now());
         

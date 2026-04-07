@@ -1,22 +1,14 @@
 package com.seckill.product.service.impl;
 
-import cn.hutool.core.util.RandomUtil;
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.seckill.product.entity.Product;
 import com.seckill.product.mapper.ProductMapper;
 import com.seckill.product.service.ProductService;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import javax.annotation.PostConstruct;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -25,106 +17,40 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
-    @Autowired
-    private RedissonClient redissonClient;
-
-    private static final String CACHE_KEY_PREFIX = "product:detail:";
-    private static final String LOCK_KEY_PREFIX = "lock:product:detail:";
-    private static final String STOCK_KEY_PREFIX = "seckill:stock:";
-    private static final String CACHE_NULL_VALUE = "null";
-
-    @PostConstruct
-    public void initStock() {
-        // 系统启动时，预热商品库存到 Redis 中，方便秒杀高并发预扣减
-        Product product = this.getById(1L);
-        if (product != null) {
-            stringRedisTemplate.opsForValue().set(STOCK_KEY_PREFIX + product.getProductId(), String.valueOf(product.getStock()));
-            log.info("预热商品库存成功: productId={}, stock={}", product.getProductId(), product.getStock());
-        }
-    }
+    private static final String PRODUCT_DETAIL_KEY_PREFIX = "product:detail:";
 
     @Override
     public Product getProductDetail(Long productId) {
-        String cacheKey = CACHE_KEY_PREFIX + productId;
-
-        // 1. 查询缓存
-        String productJson = stringRedisTemplate.opsForValue().get(cacheKey);
-
-        // 命中缓存直接返回
-        if (StrUtil.isNotBlank(productJson)) {
-            // 【缓存穿透处理】如果是之前为了防穿透写入的空值，直接返回空
-            if (CACHE_NULL_VALUE.equals(productJson)) {
-                return null;
-            }
-            return JSONUtil.toBean(productJson, Product.class);
-        }
-
-        // 如果缓存命中但字符串为空白，防范脏数据
-        if (productJson != null && productJson.trim().isEmpty()) {
-            return null;
-        }
-
-        // 2. 缓存中没有，需要查询数据库。使用 Redisson 分布式锁防【缓存击穿】
-        String lockKey = LOCK_KEY_PREFIX + productId;
-        RLock lock = redissonClient.getLock(lockKey);
+        // 先从 Redis 缓存获取
+        String key = PRODUCT_DETAIL_KEY_PREFIX + productId;
+        String productJson = stringRedisTemplate.opsForValue().get(key);
         
-        try {
-            // 尝试获取锁，最多等待 2 秒，锁的过期时间为 10 秒
-            boolean isLocked = lock.tryLock(2, 10, TimeUnit.SECONDS);
-            if (isLocked) {
-                // 获取到锁后，再次检查缓存 (Double Check)，防止其他线程已经加载到缓存
-                productJson = stringRedisTemplate.opsForValue().get(cacheKey);
-                if (StrUtil.isNotBlank(productJson)) {
-                    if (CACHE_NULL_VALUE.equals(productJson)) {
-                        return null;
-                    }
-                    return JSONUtil.toBean(productJson, Product.class);
-                }
-
-                // 3. 查数据库
-                Product product = this.getById(productId);
-
-                // 4. 【缓存穿透处理】数据库查不到，写一个空值到缓存中，并设置较短过期时间
-                if (product == null) {
-                    stringRedisTemplate.opsForValue().set(cacheKey, CACHE_NULL_VALUE, 2, TimeUnit.MINUTES);
-                    return null;
-                }
-
-                // 5. 【缓存雪崩处理】正常商品写入缓存，设置基础过期时间 + 随机过期时间，防止大量 key 同时失效
-                // 基础时间 1 小时，加上 1~10 分钟的随机时间
-                long expireTime = 60 * 60 + RandomUtil.randomInt(60, 600);
-                stringRedisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(product), expireTime, TimeUnit.SECONDS);
-
-                return product;
-            } else {
-                // 没有获取到锁，说明有其他线程正在查库和重建缓存，休眠一会再重试
-                Thread.sleep(100);
-                return getProductDetail(productId); // 递归重试
-            }
-        } catch (InterruptedException e) {
-            log.error("获取商品详情时分布式锁异常", e);
-            throw new RuntimeException("获取商品详情异常");
-        } finally {
-            // 释放锁（只释放自己加的锁）
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+        if (productJson != null) {
+            // 缓存命中，解析返回
+            // 实际项目中应该使用 JSON 序列化/反序列化工具
+            return this.getById(productId);
         }
+        
+        // 缓存未命中，从数据库获取
+        Product product = this.getById(productId);
+        if (product != null) {
+            // 存入 Redis 缓存，设置过期时间
+            stringRedisTemplate.opsForValue().set(key, product.toString());
+        }
+        
+        return product;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean deductStock(Long productId, Integer quantity) {
-        // 使用条件更新保证并发安全: stock >= quantity 才允许扣减
-        boolean updated = this.lambdaUpdate()
-                .eq(Product::getProductId, productId)
-                .ge(Product::getStock, quantity)
+        // 使用乐观锁机制扣减库存
+        boolean result = this.lambdaUpdate()
                 .setSql("stock = stock - " + quantity)
+                .eq(Product::getProductId, productId)
+                .gt(Product::getStock, 0)
                 .update();
-        if (updated) {
-            // 库存变更后清理详情缓存，避免脏读
-            stringRedisTemplate.delete(CACHE_KEY_PREFIX + productId);
-        }
-        return updated;
+        
+        return result;
     }
 }

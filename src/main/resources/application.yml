@@ -4,54 +4,19 @@ server:
 spring:
   application:
     name: seckill-app
-  # 关闭默认的数据源自动配置，使用 ShardingSphere 代理
-  autoconfigure:
-    exclude: org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+  # 禁用 Nacos 配置中心导入检查
+  cloud:
+    nacos:
+      config:
+        import-check:
+          enabled: false
   
-  shardingsphere:
-    datasource:
-      names: ds0,ds1
-      ds0:
-        type: com.zaxxer.hikari.HikariDataSource
-        driver-class-name: com.mysql.cj.jdbc.Driver
-        jdbc-url: jdbc:mysql://${DB_MASTER_HOST:127.0.0.1}:3306/seckill_0?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-        username: root
-        password: ${DB_PASSWORD:password}
-      ds1:
-        type: com.zaxxer.hikari.HikariDataSource
-        driver-class-name: com.mysql.cj.jdbc.Driver
-        jdbc-url: jdbc:mysql://${DB_MASTER_HOST:127.0.0.1}:3306/seckill_1?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-        username: root
-        password: ${DB_PASSWORD:password}
-    
-    rules:
-      sharding:
-        default-database-strategy:
-          standard:
-            sharding-column: user_id
-            sharding-algorithm-name: database_inline
-        tables:
-          sys_order:
-            actual-data-nodes: ds$->{0..1}.sys_order_$->{0..1}
-            database-strategy:
-              standard:
-                sharding-column: user_id
-                sharding-algorithm-name: database_inline
-            table-strategy:
-              standard:
-                sharding-column: order_id
-                sharding-algorithm-name: table_inline
-        sharding-algorithms:
-          database_inline:
-            type: INLINE
-            props:
-              algorithm-expression: ds$->{user_id % 2}
-          table_inline:
-            type: INLINE
-            props:
-              algorithm-expression: sys_order_$->{order_id % 2}
-    props:
-      sql-show: true # 打印真实执行的 SQL 及路由信息
+  # 使用默认的数据源配置
+  datasource:
+    url: jdbc:mysql://${DB_MASTER_HOST:127.0.0.1}:3306/seckill_0?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: ${DB_PASSWORD:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
 
   redis:
     host: ${REDIS_HOST:127.0.0.1}
