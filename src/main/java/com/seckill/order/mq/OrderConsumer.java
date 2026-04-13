@@ -1,6 +1,7 @@
 package com.seckill.order.mq;
 
 import cn.hutool.json.JSONUtil;
+import com.seckill.order.raft.RaftLogService;
 import com.seckill.order.service.OrderService;
 import com.seckill.order.raft.LeadershipSnapshot;
 import com.seckill.order.raft.RaftLeadershipService;
@@ -19,6 +20,8 @@ public class OrderConsumer implements RocketMQListener<OrderMessage> {
     private OrderService orderService;
     @Autowired
     private RaftLeadershipService raftLeadershipService;
+    @Autowired
+    private RaftLogService raftLogService;
 
     @Override
     public void onMessage(OrderMessage message) {
@@ -30,6 +33,10 @@ public class OrderConsumer implements RocketMQListener<OrderMessage> {
                         leadership.getNodeId(), leadership.getCurrentLeaderId(), leadership.getTerm(), message.getOrderId());
                 throw new RuntimeException("当前节点非 leader，触发重试");
             }
+            String command = "create_order:orderId=" + message.getOrderId()
+                    + ",userId=" + message.getUserId()
+                    + ",productId=" + message.getProductId();
+            raftLogService.appendLog(leadership.getTerm(), command);
             // 调用真正的下单业务
             orderService.createOrder(message.getOrderId(), message.getUserId(), message.getProductId());
         } catch (Exception e) {

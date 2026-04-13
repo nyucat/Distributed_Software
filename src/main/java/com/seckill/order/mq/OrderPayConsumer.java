@@ -3,6 +3,7 @@ package com.seckill.order.mq;
 import cn.hutool.json.JSONUtil;
 import com.seckill.order.raft.LeadershipSnapshot;
 import com.seckill.order.raft.RaftLeadershipService;
+import com.seckill.order.raft.RaftLogService;
 import com.seckill.order.service.OrderService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
@@ -19,6 +20,8 @@ public class OrderPayConsumer implements RocketMQListener<OrderPayMessage> {
     private OrderService orderService;
     @Autowired
     private RaftLeadershipService raftLeadershipService;
+    @Autowired
+    private RaftLogService raftLogService;
 
     @Override
     public void onMessage(OrderPayMessage message) {
@@ -30,6 +33,10 @@ public class OrderPayConsumer implements RocketMQListener<OrderPayMessage> {
                         leadership.getNodeId(), leadership.getCurrentLeaderId(), leadership.getTerm(), message.getOrderId());
                 throw new RuntimeException("当前节点非 leader，触发重试");
             }
+            String command = "pay_order:orderId=" + message.getOrderId()
+                    + ",userId=" + message.getUserId()
+                    + ",status=" + message.getStatus();
+            raftLogService.appendLog(leadership.getTerm(), command);
             orderService.executeLocalPayTransaction(message.getOrderId(), message.getUserId());
         } catch (Exception e) {
             log.error("RocketMQ 消费支付消息失败: {}", JSONUtil.toJsonStr(message), e);
