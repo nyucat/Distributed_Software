@@ -39,3 +39,8 @@ mybatis-plus:
 jwt:
   secret: seckill_jwt_secret_key_distributed_system
   expiration: 86400000 # 24 hours
+
+raft:
+  optimization:
+    enabled: ${RAFT_OPTIMIZATION_ENABLED:false}
+    leader-lease-seconds: ${RAFT_LEADER_LEASE_SECONDS:8}
