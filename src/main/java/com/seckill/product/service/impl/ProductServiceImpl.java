@@ -48,7 +48,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         boolean result = this.lambdaUpdate()
                 .setSql("stock = stock - " + quantity)
                 .eq(Product::getProductId, productId)
-                .gt(Product::getStock, 0)
+                .ge(Product::getStock, quantity)
                 .update();
         
         return result;

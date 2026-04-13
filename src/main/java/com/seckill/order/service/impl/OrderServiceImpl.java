@@ -13,9 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Arrays;
 import java.time.LocalDateTime;
 
 @Slf4j
@@ -35,28 +37,35 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private static final String BOUGHT_SET_PREFIX = "seckill:bought:";
     private static final String TOPIC_ORDER = "seckill-orders";
     private static final String TOPIC_ORDER_PAY = "seckill-order-pay";
+    private static final String LUA_SECKILL_RESERVE =
+            "if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then return -2 end; " +
+            "local stock = tonumber(redis.call('GET', KEYS[1]) or '-1'); " +
+            "if stock <= 0 then return -1 end; " +
+            "redis.call('DECR', KEYS[1]); " +
+            "redis.call('SADD', KEYS[2], ARGV[1]); " +
+            "return 1;";
 
     @Override
     public String seckill(Long productId, Long userId) {
         String stockKey = STOCK_KEY_PREFIX + productId;
         String boughtKey = BOUGHT_SET_PREFIX + productId;
 
-        // 1. 幂等性：判断用户是否已经抢购过该商品 (利用 Redis Set)
-        Boolean isMember = stringRedisTemplate.opsForSet().isMember(boughtKey, String.valueOf(userId));
-        if (Boolean.TRUE.equals(isMember)) {
+        // 1. 原子预扣减 + 幂等标记，避免并发下出现窗口期不一致。
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptText(LUA_SECKILL_RESERVE);
+        script.setResultType(Long.class);
+        Long reserveResult = stringRedisTemplate.execute(
+                script, Arrays.asList(stockKey, boughtKey), String.valueOf(userId)
+        );
+        if (reserveResult == null) {
+            return "系统繁忙，请稍后重试";
+        }
+        if (reserveResult == -2L) {
             return "您已经参与过该商品的秒杀，不能重复购买！";
         }
-
-        // 2. Redis 预扣减库存 (保证不超卖)
-        Long stock = stringRedisTemplate.opsForValue().decrement(stockKey);
-        if (stock != null && stock < 0) {
-            // 如果小于 0，说明库存不足，恢复刚刚扣减的 1 个单位，然后返回失败
-            stringRedisTemplate.opsForValue().increment(stockKey);
+        if (reserveResult == -1L) {
             return "手慢了，商品已售罄！";
         }
-
-        // 3. 将用户加入已购买集合 (防止多次快速点击导致重复下单)
-        stringRedisTemplate.opsForSet().add(boughtKey, String.valueOf(userId));
 
         // 4. 基因算法生成订单 ID：
         // 我们的分库规则是按 user_id 分库，分表是按 order_id 分表。
@@ -82,8 +91,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createOrder(Long orderId, Long userId, Long productId) {
-        // 二次检查幂等：由于前面已经通过 Redis 控制了同一用户同一商品只能下单一次，所以理论上不会重复。
-        // 但为了安全，也可以通过查询数据库订单表防重。
+        // MQ 至少一次投递，先做订单幂等检查，重复消息直接视为成功。
+        Order existed = this.getById(orderId);
+        if (existed != null) {
+            log.info("重复下单消息，订单已存在，跳过。orderId={}", orderId);
+            return;
+        }
 
         // 1. 扣减数据库实际库存 (乐观锁机制保证不超卖)
         Product product = productService.getById(productId);
@@ -149,6 +162,21 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void executeLocalPayTransaction(Long orderId, Long userId) {
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new RuntimeException("订单不存在，orderId=" + orderId);
+        }
+        if (!userId.equals(order.getUserId())) {
+            throw new RuntimeException("支付用户与订单不匹配，orderId=" + orderId);
+        }
+        if (order.getStatus() != null && order.getStatus() == 1) {
+            log.info("支付消息重复消费，订单已支付，忽略。orderId={}", orderId);
+            return;
+        }
+        if (order.getStatus() != null && order.getStatus() == 2) {
+            throw new RuntimeException("订单已取消，禁止支付，orderId=" + orderId);
+        }
+
         boolean updated = this.lambdaUpdate()
                 .eq(Order::getOrderId, orderId)
                 .eq(Order::getUserId, userId)
@@ -156,7 +184,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .set(Order::getStatus, 1)
                 .update();
         if (!updated) {
-            throw new RuntimeException("订单状态更新失败或状态已变更，orderId=" + orderId);
+            // 极端并发下这里可能被其他线程先一步更新，再次校验实现幂等。
+            Order latest = this.getById(orderId);
+            if (latest != null && latest.getStatus() != null && latest.getStatus() == 1) {
+                log.info("订单状态已由并发流程更新为已支付，忽略。orderId={}", orderId);
+                return;
+            }
+            throw new RuntimeException("订单状态更新失败，orderId=" + orderId);
         }
         log.info("订单支付成功，状态已更新为已支付。orderId={}", orderId);
     }
