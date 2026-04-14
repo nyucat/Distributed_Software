@@ -118,7 +118,58 @@ Distributed_Software/
 在项目根目录执行：
 
 ```bash
+cp .env.example .env
 docker compose up -d --build
+```
+
+Windows PowerShell 可使用：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+### 5.3 Profiles 启动模式
+
+支持两种运行模式：
+
+- `infra`：仅基础中间件（MySQL/Redis/RocketMQ）
+- `full`：完整链路（中间件 + app1/app2 + Nginx）
+
+仅启动中间件（适合 IDE 本地调试后端）：
+
+```bash
+docker compose --profile infra up -d
+```
+
+完整启动（适合联调和演示）：
+
+```bash
+docker compose --profile full up -d --build
+```
+
+查看状态：
+
+```bash
+docker compose ps
+```
+
+### 5.4 Windows 一键脚本（PowerShell）
+
+脚本位于 `scripts/` 目录：
+
+- `up-infra.ps1`：启动中间件 profile
+- `up-full.ps1`：启动完整链路 profile
+- `status.ps1`：查看 compose 状态
+- `down.ps1`：停止并清理 compose 资源
+
+执行示例：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\up-infra.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\status.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\up-full.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\down.ps1
 ```
 
 启动后主要端口：
@@ -131,7 +182,7 @@ docker compose up -d --build
 - `6379`：Redis
 - `9876`：RocketMQ NameServer
 
-### 5.3 关键环境变量（应用）
+### 5.5 关键环境变量（应用）
 
 `application.yml` / `docker-compose.yml` 中涉及：
 

@@ -4,12 +4,18 @@ server:
 spring:
   application:
     name: seckill-app
+  autoconfigure:
+    exclude:
+      - org.apache.shardingsphere.spring.boot.ShardingSphereAutoConfiguration
   # 禁用 Nacos 配置中心导入检查
   cloud:
     nacos:
       config:
         import-check:
           enabled: false
+      discovery:
+        enabled: false
+        register-enabled: false
   
   # 使用默认的数据源配置
   datasource:
@@ -22,12 +28,6 @@ spring:
     host: ${REDIS_HOST:127.0.0.1}
     port: 6379
     timeout: 3000
-
-  rocketmq:
-    name-server: ${ROCKETMQ_HOST:127.0.0.1}:9876
-    producer:
-      group: seckill-producer-group
-      send-message-timeout: 3000
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -44,3 +44,9 @@ raft:
   optimization:
     enabled: ${RAFT_OPTIMIZATION_ENABLED:false}
     leader-lease-seconds: ${RAFT_LEADER_LEASE_SECONDS:8}
+
+rocketmq:
+  name-server: ${ROCKETMQ_HOST:127.0.0.1}:9876
+  producer:
+    group: seckill-producer-group
+    send-message-timeout: 3000

@@ -6,7 +6,7 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-FROM openjdk:8-jre-slim
+FROM eclipse-temurin:8-jre
 WORKDIR /app
 COPY --from=builder /app/target/distributed-seckill-1.0-SNAPSHOT.jar app.jar
 
