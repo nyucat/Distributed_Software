@@ -1,121 +1,296 @@
-一、 系统架构草图（服务拆分）
-采用微服务架构，将系统拆分为四大核心服务，通过服务注册与发现进行协调。
-1. 服务拓扑结构
-text
-[客户端层] 
-    ↓
-[网关层 (Gateway)] —— 限流、路由、鉴权
-    ↓
-┌─────────────────────────────────────────┐
-│  [核心业务服务集群]                     │
-│  1. 用户服务 (User Service)             │
-│  2. 商品服务 (Product Service)          │
-│  3. 订单服务 (Order Service)            │
-│  4. 库存服务 (Inventory Service)        │
-└─────────────────────────────────────────┘
-    ↓
-[中间件层]
-┌─────────────────────────────────────────┐
-│  1. 注册中心 (Nacos/Eureka)              │
-│  2. 配置中心 (Nacos/Apollo)               │
-│  3. 服务容错 (Sentinel/Hystrix)          │
-│  4. 消息队列 (RabbitMQ/Kafka) —— 削峰填谷│
-└─────────────────────────────────────────┘
-    ↓
-[数据层]
-┌─────────────────────────────────────────┐
-│  1. 关系型数据库 (MySQL) —— 核心业务数据  │
-│  2. 缓存数据库 (Redis) —— 秒杀缓存/分布式锁│
-│  3. 搜索引擎 (Elasticsearch) —— 商品检索  │
-└─────────────────────────────────────────┘
-2. 核心服务职责
-表格
-服务名称	核心职责	关键功能
-用户服务	用户身份认证与管理	登录、注册、用户信息查询、风控校验
-商品服务	商品信息管理	商品详情查询、上下架、分类 / 搜索
-库存服务	库存核心控制	库存预扣减、库存回滚、库存查询、秒杀资格判断
-订单服务	订单生命周期	创建订单、支付状态同步、订单查询 / 关闭
-二、 定义各服务 API 接口（RESTful）
-采用 RESTful 风格设计，返回标准 JSON 格式。
-1. 用户服务 (User-Service)
-表格
-接口	方法	路径	入参	出参	说明
-登录	POST	/api/user/login	username/password	token, userInfo	返回 JWT Token
-获取信息	GET	/api/user/{id}	-	UserVO	获取用户详情
-2. 商品服务 (Product-Service)
-表格
-接口	方法	路径	入参	出参	说明
-列表查询	GET	/api/products	pageNum, size	Page<ProductVO>	普通商品列表
-详情查询	GET	/api/product/{id}	-	ProductDetailVO	包含库存信息
-秒杀商品	GET	/api/product/seckill/list	-	List<SeckillProductVO>	获取秒杀专场商品
-3. 库存服务 (Inventory-Service)
-表格
-接口	方法	路径	入参	出参	说明
-扣减库存	POST	/api/inventory/deduct	productId, quantity	Boolean	核心接口，需加锁
-恢复库存	POST	/api/inventory/restore	productId, quantity	Boolean	订单取消回调
-查询库存	GET	/api/inventory/{productId}	-	stockNum	实时库存
-4. 订单服务 (Order-Service)
-表格
-接口	方法	路径	入参	出参	说明
-创建订单	POST	/api/order	productId, address	orderId	调用库存扣减接口
-查询订单	GET	/api/order/{id}	-	OrderVO	根据订单号查询
-支付回调	POST	/api/order/pay/callback	orderId, status	-	支付结果更新
-三、 数据库 ER 图
-核心包含四张表，关系为：一个用户对应多个订单，一个订单对应一个商品及库存记录。
-1. 用户表 (sys_user)
-表格
-字段名	类型	备注
-user_id	BIGINT	主键
-username	VARCHAR	账号
-password	VARCHAR	加密密码
-phone	VARCHAR	手机号
-create_time	DATETIME	创建时间
-2. 商品表 (sys_product)
-表格
-字段名	类型	备注
-product_id	BIGINT	主键
-product_name	VARCHAR	商品名称
-price	DECIMAL	原价
-stock	INT	总库存 (冗余，建议主要查库存表)
-status	TINYINT	上下架状态
-pic_url	VARCHAR	商品图片
-3. 库存表 (sys_inventory)
-表格
-字段名	类型	备注
-id	BIGINT	主键
-product_id	BIGINT	关联商品 ID
-available_stock	INT	可用库存 (核心字段)
-locked_stock	INT	锁定库存
-update_time	DATETIME	更新时间
-4. 订单表 (sys_order)
-表格
-字段名	类型	备注
-order_id	BIGINT	主键 (订单号)
-user_id	BIGINT	下单用户
-product_id	BIGINT	购买商品
-amount	DECIMAL	订单金额
-status	TINYINT	状态 (0 - 待支付，1 - 已支付，2 - 已取消)
-create_time	DATETIME	创建时间
-四、 技术栈选型说明
-1. 编程语言与核心框架
-后端语言：Java (生态成熟，并发处理强大) / Go (高并发性能极佳，秒杀场景首选)。
-框架：
-Spring Boot：快速开发微服务。
-Spring Cloud Alibaba：一站式微服务解决方案。
-注册配置中心：Nacos (替代 Eureka/Config，支持动态配置)。
-服务网关：Spring Cloud Gateway (替代 Zuul，性能更好)。
-服务容错：Sentinel (限流、熔断、降级核心组件)。
-2. 数据库与缓存
-主存储：MySQL 8.0。使用 InnoDB 引擎，分库分表（若数据量大），基于 product_id 做哈希分表。
-缓存核心：Redis。
-作用：秒杀瞬间流量巨大，直接请求数据库会挂掉。Redis 作为分布式缓存，预先加载库存数据。
-数据结构：使用 String 存储库存数量；使用 Redisson 实现分布式锁 (RLock) 解决超卖问题。
-搜索引擎：Elasticsearch。用于商品列表的模糊搜索、高亮及复杂条件查询。
-3. 消息中间件
-选型：RabbitMQ 或 Kafka。
-秒杀削峰：用户请求先进入 MQ 队列，后端消费者缓慢消费，写入数据库。避免瞬时高并发压垮数据库。
-异步解耦：订单创建与库存扣减通过 MQ 通信，减少接口响应时间。
-4. 辅助工具
-接口文档：Swagger / OpenAPI 3.0。
-数据库持久层：MyBatis-Plus / JPA。
-分布式事务：Seata (确保库存扣减和订单创建的原子性)。
+# Distributed Seckill System
+
+## 1. 项目简介
+
+本项目是一个基于 Java 的分布式秒杀系统示例，聚焦高并发下单链路的核心问题：
+
+- Redis + Lua 实现秒杀库存原子预扣减与防重复购买
+- RocketMQ 实现异步削峰与最终一致性
+- MySQL 分库分表设计（`seckill_0` / `seckill_1` + `sys_order_0` / `sys_order_1`）
+- Nginx 负载均衡到双应用实例（`app1` / `app2`）
+- Redis 实现轻量 Raft 选主，限制写操作仅由 leader 执行（可开关）
+
+当前仓库为**单 Maven 模块单体应用**，通过容器编排实现“多实例部署”。
+
+---
+
+## 2. 核心技术栈
+
+### 2.1 后端框架
+
+- Java 8
+- Spring Boot 2.6.13
+- Spring Cloud 2021.0.5
+- Spring Cloud Alibaba 2021.0.5.0
+- MyBatis-Plus 3.5.2
+
+### 2.2 中间件与基础设施
+
+- MySQL 8.0.32
+- Redis 7
+- RocketMQ 4.9.4（`rocketmq-spring-boot-starter 2.2.2`）
+- Nginx 1.23
+
+### 2.3 安全与工具
+
+- Spring Security（密码加密：`BCryptPasswordEncoder`）
+- JWT（`jjwt 0.9.1`）
+- Hutool
+- Lombok
+
+---
+
+## 3. 架构与请求链路
+
+### 3.1 部署拓扑（docker-compose）
+
+```text
+Client
+  -> Nginx:80
+      -> app1:8081
+      -> app2:8082
+
+app(同构实例)
+  -> MySQL Master/Slave
+  -> Redis
+  -> RocketMQ(NameServer + Broker)
+```
+
+### 3.2 秒杀下单主链路
+
+1. 用户调用 `POST /api/order/seckill`
+2. 服务执行 Redis Lua：
+   - 校验是否重复购买（`SISMEMBER`）
+   - 校验库存并原子扣减（`GET` + `DECR`）
+   - 记录已购用户（`SADD`）
+3. 生成订单号（雪花 ID + user 基因位）
+4. 发送 RocketMQ 消息到 `seckill-orders`
+5. 消费者侧进行 leader 校验（Raft 优化开关）
+6. 写入 Raft 日志（Redis List），执行落库下单
+7. 扣减 DB 库存、创建订单；失败则回滚 Redis 预扣减
+
+### 3.3 支付更新链路
+
+1. 调用 `POST /api/order/pay`
+2. 发送支付消息到 `seckill-order-pay`
+3. 消费者校验 leader 并记录 Raft 日志
+4. 执行本地事务，将订单状态从 `0` 更新为 `1`
+
+---
+
+## 4. 项目结构说明
+
+```text
+Distributed_Software/
+├─ src/
+│  ├─ main/java/com/seckill/
+│  │  ├─ user/      # 用户域：登录、注册、查询、JWT
+│  │  ├─ product/   # 商品域：商品查询、库存扣减
+│  │  └─ order/     # 订单域：秒杀、支付、MQ、Raft
+│  └─ main/resources/
+│     ├─ application.yml
+│     └─ mapper/
+├─ sql/
+│  └─ schema.sql    # 分库分表建表脚本
+├─ mysql/
+│  ├─ master/       # 主库配置与初始化
+│  └─ slave/        # 从库配置与初始化
+├─ nginx/
+│  ├─ conf/nginx.conf
+│  └─ html/
+├─ Dockerfile
+├─ docker-compose.yml
+└─ pom.xml
+```
+
+---
+
+## 5. 本地运行指南
+
+### 5.1 前置要求
+
+- Docker / Docker Compose
+- JDK 8（仅本地直接运行 jar 时需要）
+- Maven 3.8+（仅本地源码构建时需要）
+
+### 5.2 一键启动（推荐）
+
+在项目根目录执行：
+
+```bash
+docker compose up -d --build
+```
+
+启动后主要端口：
+
+- `80`：Nginx 入口
+- `8081`：应用实例 1
+- `8082`：应用实例 2
+- `3306`：MySQL 主库
+- `3307`：MySQL 从库
+- `6379`：Redis
+- `9876`：RocketMQ NameServer
+
+### 5.3 关键环境变量（应用）
+
+`application.yml` / `docker-compose.yml` 中涉及：
+
+- `SERVER_PORT`（默认 `8081`）
+- `DB_MASTER_HOST`
+- `DB_PASSWORD`
+- `REDIS_HOST`
+- `ROCKETMQ_HOST`
+- `RAFT_OPTIMIZATION_ENABLED`（默认 `false`）
+- `RAFT_LEADER_LEASE_SECONDS`（默认 `8`）
+
+---
+
+## 6. API 接口清单
+
+统一返回结构为 `Result<T>`。
+
+### 6.1 用户接口
+
+#### `POST /api/user/login`
+
+- 入参：`LoginDTO`（`username`, `password`）
+- 出参：`LoginVO`（`token`, `userInfo`）
+
+#### `POST /api/user/register`
+
+- 入参：`RegisterDTO`（`username`, `password`, `phone`）
+- 出参：`Boolean`
+
+#### `GET /api/user/{id}`
+
+- 出参：`UserVO`
+
+### 6.2 商品接口
+
+#### `GET /api/product/{productId}`
+
+- 出参：`Product`
+- 逻辑：先查 Redis 缓存，未命中回源 DB
+
+#### `GET /api/product/seckill/list`
+
+- 当前实现：占位返回（后续可接入真实商品列表查询）
+
+### 6.3 订单接口
+
+#### `POST /api/order/seckill`
+
+- 参数：`productId`, `userId`（当前为压测简化，真实场景应从 JWT 获取）
+- 返回：秒杀受理结果文本
+
+#### `GET /api/order/{orderId}`
+
+- 返回：订单详情
+
+#### `POST /api/order/pay`
+
+- 参数：`orderId`, `userId`
+- 返回：支付请求受理结果文本（异步更新状态）
+
+---
+
+## 7. 数据模型与分片设计
+
+### 7.1 核心表
+
+- `sys_user`
+- `sys_product`
+- `sys_order_0`
+- `sys_order_1`
+
+### 7.2 数据库划分
+
+- 库：`seckill_0`、`seckill_1`
+- 订单表按库内分表：`sys_order_0`、`sys_order_1`
+- 目标：支持高并发下订单写入扩展能力
+
+### 7.3 订单号路由策略
+
+订单 ID 在雪花 ID 基础上融合 `userId % 2` 基因位，提升路由可预测性：
+
+- 便于配合分片规则进行按用户/按订单的路由定位
+- 降低跨分片查询与写入不均风险
+
+---
+
+## 8. 消息与一致性策略
+
+### 8.1 消息主题
+
+- `seckill-orders`：异步创建订单
+- `seckill-order-pay`：异步支付状态更新
+
+### 8.2 幂等与回滚
+
+- 订单创建前先做订单主键幂等检查
+- 库存扣减失败或写库失败时回滚 Redis 预扣减与已购标记
+- 支付状态更新使用条件更新（`status = 0 -> 1`）防止重复更新
+
+### 8.3 Raft 轻量优化（可选）
+
+- Redis Key 控制 leader 租约与 term
+- 非 leader 消费者拒绝执行写操作并抛异常触发重试
+- 写命令追加到 Redis Raft 日志，便于观测
+
+---
+
+## 9. 已实现能力与当前边界
+
+### 9.1 已实现
+
+- 秒杀核心并发控制（Redis Lua）
+- 异步下单与支付状态更新（RocketMQ）
+- 基础用户登录注册与 JWT 生成
+- 双实例 + Nginx 负载均衡
+- 数据初始化脚本与容器化部署
+
+### 9.2 当前边界 / 待完善
+
+- 还未提供完整压测脚本与指标看板
+- 商品秒杀列表接口目前为占位实现
+- 安全链路（JWT 鉴权拦截）未完全闭环到订单接口
+- 分片规则配置细节建议补充独立文档（当前以代码注释+SQL为主）
+- 缺少自动化测试与 CI 流水线
+
+---
+
+## 10. 快速联调示例
+
+### 10.1 注册
+
+```bash
+curl -X POST "http://localhost/api/user/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"u1\",\"password\":\"123456\",\"phone\":\"13800000000\"}"
+```
+
+### 10.2 登录
+
+```bash
+curl -X POST "http://localhost/api/user/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"u1\",\"password\":\"123456\"}"
+```
+
+### 10.3 秒杀下单
+
+```bash
+curl -X POST "http://localhost/api/order/seckill?productId=1&userId=1"
+```
+
+### 10.4 支付订单
+
+```bash
+curl -X POST "http://localhost/api/order/pay?orderId=<orderId>&userId=1"
+```
+
+---
+
+## 11. 许可证
+
+当前仓库未声明独立 LICENSE 文件；如需开源分发，建议补充许可证声明。
