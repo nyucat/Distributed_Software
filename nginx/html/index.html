@@ -3,32 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>分布式秒杀系统 - 商品详情</title>
+    <title>分布式秒杀系统 - 用户中心</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>秒杀商品详情 (测试动静分离)</h1>
-        
-        <div class="product-card" id="product-card">
-            <h2 id="product-name">正在加载...</h2>
-            <div class="price-box">
-                <span class="label">秒杀价：</span>
-                <span class="price">¥ <span id="product-price">--</span></span>
-            </div>
-            <div class="stock-box">
-                <span class="label">剩余库存：</span>
-                <span class="stock" id="product-stock">--</span>
-            </div>
-            <p class="desc" id="product-desc">......</p>
-            
-            <button class="buy-btn" id="buy-btn">立即抢购</button>
-        </div>
+    <main class="page">
+        <div class="ambient ambient-1"></div>
+        <div class="ambient ambient-2"></div>
+        <div class="ambient ambient-3"></div>
 
-        <div class="server-info">
-            当前响应后端：<span id="server-port" style="color: #d32f2f; font-weight: bold;">--</span>
-        </div>
-    </div>
+        <section class="auth-shell" id="auth-shell">
+            <aside class="brand-panel">
+                <div class="brand-chip">Distributed Seckill</div>
+                <h1>账户门户</h1>
+                <p>安全访问秒杀系统，完成登录与注册。页面已升级为更精致、分层且动态化的视觉风格。</p>
+
+                <ul class="feature-list">
+                    <li>双态表单动效切换</li>
+                    <li>前端实时校验与提示</li>
+                    <li>自适应桌面与移动端</li>
+                </ul>
+
+                <div class="brand-glass">
+                    <div class="brand-kpi">
+                        <span>System Status</span>
+                        <strong id="server-port">Unknown</strong>
+                    </div>
+                    <div class="brand-kpi">
+                        <span>Last Action</span>
+                        <strong id="last-action">Ready</strong>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="form-panel">
+                <div class="switcher" role="tablist" aria-label="切换登录和注册">
+                    <button id="login-tab" class="tab-btn active" data-mode="login" type="button">登录</button>
+                    <button id="register-tab" class="tab-btn" data-mode="register" type="button">注册</button>
+                    <span class="switcher-highlight" id="switcher-highlight"></span>
+                </div>
+
+                <form id="login-form" class="auth-form active" autocomplete="on">
+                    <h2>欢迎回来</h2>
+                    <p class="subtitle">输入账户信息以继续访问系统。</p>
+
+                    <label class="input-field">
+                        <span>用户名</span>
+                        <input id="login-username" type="text" placeholder="请输入用户名" required>
+                    </label>
+
+                    <label class="input-field">
+                        <span>密码</span>
+                        <input id="login-password" type="password" placeholder="请输入密码" required>
+                    </label>
+
+                    <button class="submit-btn" type="submit">立即登录</button>
+                </form>
+
+                <form id="register-form" class="auth-form" autocomplete="on">
+                    <h2>创建账户</h2>
+                    <p class="subtitle">注册后即可参与秒杀与订单管理。</p>
+
+                    <label class="input-field">
+                        <span>用户名</span>
+                        <input id="register-username" type="text" placeholder="3-20 位用户名" required>
+                    </label>
+
+                    <label class="input-field">
+                        <span>手机号</span>
+                        <input id="register-phone" type="tel" placeholder="请输入 11 位手机号" required>
+                    </label>
+
+                    <label class="input-field">
+                        <span>密码</span>
+                        <input id="register-password" type="password" placeholder="至少 6 位密码" required>
+                    </label>
+
+                    <button class="submit-btn register-btn" type="submit">完成注册</button>
+                </form>
+
+                <section class="result-card" id="result-card" aria-live="polite">
+                    <h3>登录结果</h3>
+                    <p id="result-message">尚未执行登录。</p>
+                    <div class="result-grid">
+                        <div>
+                            <span>用户ID</span>
+                            <strong id="result-user-id">-</strong>
+                        </div>
+                        <div>
+                            <span>用户名</span>
+                            <strong id="result-username">-</strong>
+                        </div>
+                        <div>
+                            <span>手机号</span>
+                            <strong id="result-phone">-</strong>
+                        </div>
+                        <div>
+                            <span>Token片段</span>
+                            <strong id="result-token">-</strong>
+                        </div>
+                    </div>
+                </section>
+            </section>
+        </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <script src="js/main.js"></script>
 </body>
