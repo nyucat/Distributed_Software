@@ -1,4 +1,4 @@
-﻿package com.seckill.product.controller;
+package com.seckill.product.controller;
 
 import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.alibaba.csp.sentinel.slots.block.BlockException;

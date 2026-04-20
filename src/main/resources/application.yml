@@ -57,7 +57,7 @@ rocketmq:
     send-message-timeout: 3000
 
 governance:
-  message: ${governance.message:governance-default}
+  message: governance-default
 
 management:
   endpoints:
