@@ -1,5 +1,7 @@
-package com.seckill.product.controller;
+﻿package com.seckill.product.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.seckill.product.entity.Product;
 import com.seckill.product.service.ProductService;
 import com.seckill.user.vo.Result;
@@ -16,10 +18,8 @@ public class ProductController {
     @Autowired
     private ProductService productService;
 
-    /**
-     * 获取商品详情
-     */
     @GetMapping("/{productId}")
+    @SentinelResource(value = "productDetail", blockHandler = "handleProductBlock", fallback = "handleProductFallback")
     public Result<Product> getProductDetail(@PathVariable("productId") Long productId) {
         Product product = productService.getProductDetail(productId);
         if (product != null) {
@@ -28,12 +28,16 @@ public class ProductController {
         return Result.error("商品未找到");
     }
 
-    /**
-     * 获取秒杀商品列表
-     */
+    public Result<Product> handleProductBlock(Long productId, BlockException ex) {
+        return Result.error("当前访问过于频繁，已触发限流: " + ex.getClass().getSimpleName());
+    }
+
+    public Result<Product> handleProductFallback(Long productId, Throwable throwable) {
+        return Result.error("服务降级中，请稍后重试: " + throwable.getMessage());
+    }
+
     @GetMapping("/seckill/list")
     public Result<?> getSeckillProductList() {
-        // 实际项目中应该从数据库查询秒杀商品列表
         return Result.success(null);
     }
 }

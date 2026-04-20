@@ -1,0 +1,49 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: seckill-gateway
+  config:
+    import: optional:nacos:${spring.application.name}.yaml?refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      discovery:
+        enabled: true
+        register-enabled: true
+      config:
+        enabled: true
+        file-extension: yaml
+        import-check:
+          enabled: false
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: seckill-api-route
+          uri: lb://seckill-app
+          predicates:
+            - Path=/api/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                redis-rate-limiter.replenishRate: 15
+                redis-rate-limiter.burstCapacity: 30
+            - name: CircuitBreaker
+              args:
+                name: seckillCircuit
+                fallbackUri: forward:/fallback/seckill
+
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: 6379
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway,metrics
